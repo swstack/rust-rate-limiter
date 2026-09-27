@@ -1,22 +1,10 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 
 use axum::{Json, Router, extract::State, routing::post, routing::get};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RateLimitConfig {
-    pub window_seconds: u64,
-    pub request_per_window: u64,
-}
+use crate::limiter::{RateLimitConfig, RateLimiter};
 
-impl Default for RateLimitConfig {
-    fn default() -> Self {
-        Self {
-            window_seconds: 60,
-            request_per_window: 100,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 pub struct RateLimitRequest {
@@ -34,7 +22,7 @@ pub struct RateLimitResponse {
 
 #[derive(Clone, Default)]
 pub struct AppState {
-    config: RateLimitConfig,
+    limiter: Arc<RateLimiter>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -47,30 +35,30 @@ pub fn router(state: AppState) -> Router {
 
 async fn ratelimit(
     State(state): State<AppState>,
-    Json(_req): Json<RateLimitRequest>,
+    Json(req): Json<RateLimitRequest>,
 ) -> Json<RateLimitResponse> {
-    // TODO: plug in the actual rate limiter keyed on client_id/resource.
-    // let config = *state.config.read().unwrap();
-    eprintln!("Check rate limit {:?}", _req);
+    eprintln!("Check rate limit {:?}", req);
+    let (allowed, remaining, retry_after) = state.limiter.check(&req.client_id, &req.resource);
     Json(RateLimitResponse {
-        allowed: true,
-        remaining: state.config.request_per_window,
-        retry_after: None,
+        allowed: allowed,
+        remaining: remaining,
+        retry_after: retry_after,
     })
 }
 
 async fn configure(
-    State(mut state): State<AppState>,
+    State(state): State<AppState>,
     Json(new_config): Json<RateLimitConfig>,
 ) -> Json<RateLimitConfig> {
     eprintln!("Configuring {:?}", new_config);
-    state.config = new_config;
+    state.limiter.update_config(new_config);
     Json(new_config)
 }
 
 async fn get_config(
     State(state): State<AppState>
 ) -> Json<RateLimitConfig> {
-    eprintln!("Getting config {:?}", state.config);
-    Json(state.config)
+    eprintln!("Getting config");
+    let config = state.limiter.config();
+    Json(config)
 }
