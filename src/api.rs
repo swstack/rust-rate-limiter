@@ -37,7 +37,7 @@ async fn ratelimit(
     State(state): State<AppState>,
     Json(req): Json<RateLimitRequest>,
 ) -> Json<RateLimitResponse> {
-    eprintln!("Check rate limit {:?}", req);
+    eprintln!("Check global rate limit {:?}", req);
     let (allowed, remaining, retry_after) = state.limiter.check(&req.client_id, &req.resource);
     Json(RateLimitResponse {
         allowed: allowed,

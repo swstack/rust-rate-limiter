@@ -1,4 +1,6 @@
-use std::sync::RwLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -18,16 +20,27 @@ impl Default for RateLimitConfig {
 }
 
 
+/// A client's current fixed window for one resource: when it started and how many requests it has used.
+struct ClientWindow {
+    start: Instant,
+    count: u64,
+}
+
 #[derive(Default)]
 pub struct RateLimiter {
     config: RwLock<RateLimitConfig>,
-    // TODO: per-client counters, e.g. DashMap<String, ClientWindow>,
-    // or Mutex<HashMap<String, ClientWindow>>
+    // One lock for all clients; simple, but every check contends on it.
+    // TODO: swap for DashMap<(String, String), ClientWindow> to shard the lock.
+    // Keyed by (client_id, resource).
+    clients: Mutex<HashMap<(String, String), ClientWindow>>,
 }
 
 impl RateLimiter {
     pub fn new(config: RateLimitConfig) -> Self {
-        Self { config: RwLock::new(config) }
+        Self {
+            config: RwLock::new(config),
+            clients: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn config(&self) -> RateLimitConfig {
@@ -35,13 +48,41 @@ impl RateLimiter {
         *self.config.read().unwrap()
     }
 
-    pub fn update_config(&self, config: RateLimitConfig) {   // &self, not &mut self
+    pub fn update_config(&self, config: RateLimitConfig) {
         *self.config.write().unwrap() = config;
     }
 
     pub fn check(&self, client_id: &str, resource: &str) -> (bool, u64, Option<u64>) {
+        // TODO: Clients never expire or are never removed from the map.
+        self.check_at(client_id, resource, Instant::now())
+    }
+
+    /// Same as `check`, but with the current time passed in so tests can control the clock.
+    pub fn check_at(
+        &self,
+        client_id: &str,
+        resource: &str,
+        now: Instant,
+    ) -> (bool, u64, Option<u64>) {
         let config = self.config();
-        // update this client's counters under their own fine-grained lock
-        (true, config.request_per_window, Some(100))
+        let window = Duration::from_secs(config.window_seconds);
+
+        let mut clients = self.clients.lock().unwrap();
+        let entry = clients
+            .entry((client_id.to_string(), resource.to_string()))
+            .or_insert(ClientWindow { start: now, count: 0 });
+
+        // The window has expired, so start a fresh one.
+        if now.duration_since(entry.start) >= window {
+            *entry = ClientWindow { start: now, count: 0 };
+        }
+
+        if entry.count < config.request_per_window {
+            entry.count += 1;
+            (true, config.request_per_window - entry.count, None)
+        } else {
+            let wait = window - now.duration_since(entry.start);
+            (false, 0, Some(wait.as_millis().div_ceil(1000) as u64))
+        }
     }
 }

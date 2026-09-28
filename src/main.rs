@@ -1,4 +1,4 @@
-use pura_coding_interview::api::{AppState, router};
+use ratelimiter::api::{AppState, router};
 
 #[tokio::main]
 async fn main() {

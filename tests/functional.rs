@@ -4,7 +4,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use pura_coding_interview::api::{AppState, router};
+use ratelimiter::api::{AppState, router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 

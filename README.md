@@ -9,6 +9,11 @@ Simple rate limiter implementation in Rust. Runs against in memory or configurab
 cargo run
 ```
 
+## Design Tradeoffs
+
+Fixed window rate limiting:
+- This is a naive approach that was simpler to implement but allows for bursty traffic.
+
 ## Load Testing
 
 **Load testing from tests/nonfunctional.rs**:
